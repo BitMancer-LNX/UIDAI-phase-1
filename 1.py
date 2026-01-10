@@ -1,154 +1,321 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import train_test_split
-import numpy as np
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+import glob
+import warnings
 
-# Set page configuration
-st.set_page_config(page_title="Aadhar Service Analytics Dashboard", layout="wide")
+# Suppress warnings for a clean UI
+warnings.filterwarnings('ignore')
 
-st.title("🇮🇳 Aadhar Service Analytics & Prediction Dashboard")
+# --- 1. PAGE CONFIGURATION (The Foundation) ---
+st.set_page_config(
+    page_title="Aadhar Nexus | AI Command Center",
+    layout="wide",
+    page_icon="🧬",
+    initial_sidebar_state="expanded"
+)
+
+# --- 2. ETHEREAL STYLING (Custom CSS) ---
+# This injects a "Dark Glassmorphism" theme
 st.markdown("""
-This dashboard analyzes Biometric, Demographic, and Enrolment trends to identify **anomalies** and **forecast service load**.
-""")
+<style>
+    /* Main Background - Deep Futuristic Blue/Black Gradient */
+    .stApp {
+        background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+        color: #ffffff;
+    }
+    
+    /* Glassmorphism Cards for Metrics */
+    div[data-testid="stMetric"] {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 15px;
+        border-radius: 15px;
+        box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+        backdrop-filter: blur(5px);
+    }
+    
+    /* Headers */
+    h1, h2, h3 {
+        color: #ffffff;
+        font-family: 'Helvetica Neue', sans-serif;
+        font-weight: 200;
+        text-shadow: 0 0 10px rgba(0, 198, 255, 0.5);
+    }
+    
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 20px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: rgba(255,255,255,0.05);
+        border-radius: 10px;
+        color: white;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #00c6ff;
+        color: black;
+        font-weight: bold;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# --- Sidebar: File Uploads ---
-st.sidebar.header("📂 Data Upload")
-st.sidebar.info("Upload the CSV files for each category below.")
-
-bio_files = st.sidebar.file_uploader("Upload Biometric CSVs", accept_multiple_files=True, type="csv")
-demo_files = st.sidebar.file_uploader("Upload Demographic CSVs", accept_multiple_files=True, type="csv")
-enrol_files = st.sidebar.file_uploader("Upload Enrolment CSVs", accept_multiple_files=True, type="csv")
-
-# --- Helper Function to Load Data ---
+# --- 3. INTELLIGENT DATA LOADER ---
 @st.cache_data
-def load_data(files):
+def load_data():
+    # Auto-detect biometric files
+    files = glob.glob("api_data_aadhar_biometric_*.csv")
     if not files:
-        return None
+        return None, "missing"
+    
     df_list = []
-    for file in files:
-        df_list.append(pd.read_csv(file))
-    return pd.concat(df_list, ignore_index=True)
-
-# --- Main App Logic ---
-if bio_files and demo_files and enrol_files:
-    with st.spinner('Loading and Processing Data...'):
-        # 1. Load Data
-        df_bio = load_data(bio_files)
-        df_demo = load_data(demo_files)
-        df_enrol = load_data(enrol_files)
-
-        # 2. Preprocessing
-        # Date Conversion
-        df_bio['date'] = pd.to_datetime(df_bio['date'], dayfirst=True)
-        df_demo['date'] = pd.to_datetime(df_demo['date'], dayfirst=True)
-        df_enrol['date'] = pd.to_datetime(df_enrol['date'], dayfirst=True)
-
-        # Calculate Totals
-        df_bio['total_bio'] = df_bio['bio_age_5_17'] + df_bio['bio_age_17_']
-        df_demo['total_demo'] = df_demo['demo_age_5_17'] + df_demo['demo_age_17_']
-        df_enrol['total_enrol'] = df_enrol['age_0_5'] + df_enrol['age_5_17'] + df_enrol['age_18_greater']
-
-    st.success("Data Successfully Loaded!")
-
-    # --- TABBED VIEW ---
-    tab1, tab2, tab3 = st.tabs(["📊 EDA & Trends", "⚠️ Anomaly Detection", "🔮 Predictive Model"])
-
-    # === TAB 1: EDA ===
-    with tab1:
-        st.header("Service Usage Trends")
-        
-        # Key Metrics
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Biometric Updates", f"{df_bio['total_bio'].sum():,}")
-        col2.metric("Total Demographic Updates", f"{df_demo['total_demo'].sum():,}")
-        col3.metric("Total New Enrolments", f"{df_enrol['total_enrol'].sum():,}")
-
-        # Plot 1: Activity by State
-        st.subheader("Activity Volume by State")
-        state_bio = df_bio.groupby('state')['total_bio'].sum().sort_values(ascending=False).head(10).reset_index()
-        fig_state = px.bar(state_bio, x='state', y='total_bio', title="Top 10 States - Biometric Activity", color='total_bio')
-        st.plotly_chart(fig_state, use_container_width=True)
-
-        # Plot 2: Time Series
-        st.subheader("Daily Transaction Volume")
-        daily_bio = df_bio.groupby('date')['total_bio'].sum().reset_index()
-        fig_time = px.line(daily_bio, x='date', y='total_bio', title="Daily Biometric Transactions (Notice the Spikes)")
-        st.plotly_chart(fig_time, use_container_width=True)
-
-    # === TAB 2: ANOMALIES ===
-    with tab2:
-        st.header("Anomaly Detection")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("1. The 'First of Month' Surge")
-            st.markdown("We detected massive spikes on the 1st of every month.")
+    for f in files:
+        try:
+            temp = pd.read_csv(f)
+            df_list.append(temp)
+        except:
+            pass
             
-            # Highlight Spikes
-            daily_bio['day'] = daily_bio['date'].dt.day
-            spikes = daily_bio[daily_bio['day'] == 1].sort_values('total_bio', ascending=False).head(5)
-            st.write("Top Spike Dates:")
-            st.dataframe(spikes[['date', 'total_bio']].style.format({"total_bio": "{:,}"}))
+    if df_list:
+        df = pd.concat(df_list, ignore_index=True)
+        df['date'] = pd.to_datetime(df['date'], dayfirst=True)
+        df['total_bio'] = df['bio_age_5_17'] + df['bio_age_17_']
+        return df, "success"
+    return None, "empty"
 
-        with col2:
-            st.subheader("2. Unusual Activity Ratios")
-            st.markdown("Regions with extremely high Biometric Updates vs. New Enrolments.")
-            
-            # Ratio Calculation
-            s_bio = df_bio.groupby('state')['total_bio'].sum()
-            s_enrol = df_enrol.groupby('state')['total_enrol'].sum()
-            ratio_df = pd.DataFrame({'Biometric': s_bio, 'Enrolment': s_enrol})
-            ratio_df['Ratio'] = ratio_df['Biometric'] / ratio_df['Enrolment']
-            
-            outliers = ratio_df.sort_values('Ratio', ascending=False).head(10)
-            st.dataframe(outliers.style.format("{:.2f}"))
+# Load Data
+df, status = load_data()
 
-    # === TAB 3: PREDICTION ===
-    with tab3:
-        st.header("Service Load Forecaster")
-        st.markdown("This model predicts the expected load to help with server scaling.")
+# --- 4. SIDEBAR NAVIGATION ---
+st.sidebar.markdown("## 🧬 Aadhar Nexus")
+st.sidebar.markdown("---")
+if status == "missing":
+    st.error("No Data Found")
+    st.sidebar.warning("Please place CSV files in the folder.")
+    st.stop()
 
-        # Prepare Data for Training
-        daily_data = df_bio.groupby('date')['total_bio'].sum().reset_index()
-        daily_data['day_of_week'] = daily_data['date'].dt.dayofweek
-        daily_data['day_of_month'] = daily_data['date'].dt.day
-        daily_data['month'] = daily_data['date'].dt.month
-        daily_data['is_start_of_month'] = (daily_data['day_of_month'] == 1).astype(int)
+# Date Filter in Sidebar
+min_date = df['date'].min()
+max_date = df['date'].max()
+st.sidebar.markdown("### 🗓️ Time Travel")
+date_range = st.sidebar.date_input(
+    "Filter Date Range",
+    value=(min_date, max_date),
+    min_value=min_date,
+    max_value=max_date
+)
 
-        X = daily_data[['day_of_week', 'day_of_month', 'month', 'is_start_of_month']]
-        y = daily_data['total_bio']
+# Apply Filter
+mask = (df['date'].dt.date >= date_range[0]) & (df['date'].dt.date <= date_range[1])
+filtered_df = df.loc[mask]
 
-        # Train Model
-        model = RandomForestRegressor(n_estimators=50, random_state=42)
-        model.fit(X, y)
+# --- 5. HEADS UP DISPLAY (KPIs) ---
+st.markdown("# 🧬 Aadhar Operations Command")
+st.markdown(f"### *System Status: Active | Monitoring {filtered_df['state'].nunique()} States*")
+st.write("")
 
-        # User Input
-        st.subheader("Check Forecast for a Future Date")
-        input_date = st.date_input("Select Date")
+# KPIs
+col1, col2, col3, col4 = st.columns(4)
+total_req = filtered_df['total_bio'].sum()
+peak_day_load = filtered_df.groupby('date')['total_bio'].sum().max()
+avg_load = filtered_df.groupby('date')['total_bio'].mean()
+top_state = filtered_df.groupby('state')['total_bio'].sum().idxmax()
+
+col1.metric("Total Transactions", f"{total_req:,.0f}", "Live")
+col2.metric("Peak System Load", f"{peak_day_load:,.0f}", "Critical Threshold")
+col3.metric("Avg Daily Traffic", f"{avg_load:,.0f}", "Normal")
+col4.metric("Highest Activity Zone", top_state, "Hotspot")
+
+st.markdown("---")
+
+# --- 6. MAIN INTERFACE TABS ---
+tab_eda, tab_ai, tab_sim, tab_pred = st.tabs([
+    "📊 Deep Dive Analytics", 
+    "🧠 AI Cluster Intelligence", 
+    "📉 Smart Load Balancer", 
+    "🔮 Future Prophet"
+])
+
+# === TAB 1: VISUAL ANALYTICS (Sunburst & Time Series) ===
+with tab_eda:
+    col_a, col_b = st.columns([2, 1])
+    
+    with col_a:
+        st.subheader("Interactive Temporal Flow")
+        # Aggregating for time series
+        daily = filtered_df.groupby('date')['total_bio'].sum().reset_index()
+        # Add Moving Average for "Smoothness"
+        daily['7_Day_Avg'] = daily['total_bio'].rolling(window=7).mean()
         
-        if st.button("Predict Load"):
-            # Create feature vector
-            input_features = pd.DataFrame({
-                'day_of_week': [input_date.weekday()],
-                'day_of_month': [input_date.day],
-                'month': [input_date.month],
-                'is_start_of_month': [1 if input_date.day == 1 else 0]
-            })
+        fig_line = go.Figure()
+        fig_line.add_trace(go.Scatter(x=daily['date'], y=daily['total_bio'], mode='lines', name='Raw Traffic', line=dict(color='#00c6ff', width=1)))
+        fig_line.add_trace(go.Scatter(x=daily['date'], y=daily['7_Day_Avg'], mode='lines', name='Trend (7-Day Avg)', line=dict(color='#ff00cc', width=3)))
+        fig_line.update_layout(
+            template="plotly_dark", 
+            paper_bgcolor='rgba(0,0,0,0)', 
+            plot_bgcolor='rgba(0,0,0,0)',
+            hovermode="x unified"
+        )
+        st.plotly_chart(fig_line, use_container_width=True)
+        
+    with col_b:
+        st.subheader("Geographic Hierarchy")
+        st.markdown("Click to drill down: State -> District")
+        # Sunburst Chart
+        hier_df = filtered_df.groupby(['state', 'district'])['total_bio'].sum().reset_index()
+        # Limit to top states for rendering speed
+        top_states = hier_df.groupby('state')['total_bio'].sum().nlargest(10).index
+        hier_df_small = hier_df[hier_df['state'].isin(top_states)]
+        
+        fig_sun = px.sunburst(
+            hier_df_small, 
+            path=['state', 'district'], 
+            values='total_bio',
+            color='total_bio',
+            color_continuous_scale='Bluyl'
+        )
+        fig_sun.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_sun, use_container_width=True)
 
-            prediction = model.predict(input_features)[0]
+# === TAB 2: AI CLUSTERING (Unsupervised Learning) ===
+with tab_ai:
+    st.subheader("🧠 Unsupervised Anomaly Detection")
+    st.write("The AI has analyzed district-level patterns to group them into 'Behavior Clusters'.")
+    
+    # Prepare Data for Clustering
+    district_stats = filtered_df.groupby(['state', 'district']).agg({
+        'total_bio': 'sum',
+        'bio_age_5_17': 'sum',
+        'bio_age_17_': 'sum'
+    }).reset_index()
+    
+    # Machine Learning Logic
+    X = district_stats[['total_bio', 'bio_age_5_17', 'bio_age_17_']]
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    kmeans = KMeans(n_clusters=3, random_state=42)
+    district_stats['Cluster'] = kmeans.fit_predict(X_scaled)
+    
+    # Rename clusters based on size (Logic: High mean = High Traffic)
+    cluster_means = district_stats.groupby('Cluster')['total_bio'].mean().sort_values()
+    cluster_map = {
+        cluster_means.index[0]: 'Low Volume (Safe)',
+        cluster_means.index[1]: 'Medium Volume (Stable)',
+        cluster_means.index[2]: 'High Volume (Critical Risk)'
+    }
+    district_stats['Risk Profile'] = district_stats['Cluster'].map(cluster_map)
+    
+    # Scatter Plot
+    fig_cluster = px.scatter(
+        district_stats, 
+        x='bio_age_5_17', 
+        y='bio_age_17_', 
+        color='Risk Profile',
+        size='total_bio',
+        hover_data=['state', 'district'],
+        title="District Risk Clustering (AI Segmented)",
+        color_discrete_map={'High Volume (Critical Risk)': '#ff0055', 'Medium Volume (Stable)': '#00c6ff', 'Low Volume (Safe)': '#00ff99'}
+    )
+    fig_cluster.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', height=600)
+    st.plotly_chart(fig_cluster, use_container_width=True)
+    
+    # Show High Risk List
+    st.warning("⚠️ High Risk Districts Identified by AI:")
+    st.dataframe(district_stats[district_stats['Risk Profile'] == 'High Volume (Critical Risk)'][['state', 'district', 'total_bio']].sort_values('total_bio', ascending=False).head(10), hide_index=True)
 
-            # Display Result
-            st.metric(label=f"Predicted Transactions for {input_date}", value=f"{int(prediction):,}")
-            
-            if prediction > 5_000_000:
-                st.error("🚨 CRITICAL LOAD PREDICTED: Ensure Max Server Capacity!")
-            elif prediction > 1_000_000:
-                st.warning("⚠️ HIGH LOAD: Monitor Systems.")
+# === TAB 3: LOAD BALANCER (The Simulation) ===
+with tab_sim:
+    st.subheader("📉 Intelligent Traffic Smoothing Simulator")
+    
+    # Simulation Layout
+    c1, c2 = st.columns([1, 2])
+    
+    daily_agg = filtered_df.groupby('date')['total_bio'].sum().reset_index().sort_values('date')
+    current_peak = daily_agg['total_bio'].max()
+    safe_cap = daily_agg['total_bio'].mean() * 1.5
+    
+    with c1:
+        st.markdown("### Controls")
+        capacity = st.slider(
+            "Define Server Capacity (Daily Requests)",
+            min_value=100000,
+            max_value=int(current_peak),
+            value=int(safe_cap),
+            step=50000
+        )
+        st.info("Adjust the slider to see how spreading traffic prevents crashes.")
+
+    with c2:
+        # Optimization Algorithm
+        sim_data = daily_agg.copy()
+        queue = 0
+        optimized = []
+        
+        for load in sim_data['total_bio']:
+            total = load + queue
+            if total > capacity:
+                processed = capacity
+                queue = total - capacity
             else:
-                st.success("✅ NORMAL LOAD: Standard Operations.")
+                processed = total
+                queue = 0
+            optimized.append(processed)
+            
+        sim_data['Managed Load'] = optimized
+        
+        # Plot
+        fig_sim = go.Figure()
+        fig_sim.add_trace(go.Scatter(x=sim_data['date'], y=sim_data['total_bio'], fill='tozeroy', name='Original Crash Risk', line=dict(color='#ff4b4b')))
+        fig_sim.add_trace(go.Scatter(x=sim_data['date'], y=sim_data['Managed Load'], fill='tonexty', name='Optimized Flow', line=dict(color='#00ff99')))
+        fig_sim.add_hline(y=capacity, line_dash="dash", annotation_text="Max Capacity", line_color="white")
+        fig_sim.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_sim, use_container_width=True)
 
-else:
-    st.info("👋 Please upload the CSV files in the sidebar to begin analysis.")
+# === TAB 4: PREDICTION (Forecasting) ===
+with tab_pred:
+    st.subheader("🔮 Predictive Intelligence")
+    
+    # Feature Engineering
+    df_model = daily_agg.copy()
+    df_model['day'] = df_model['date'].dt.day
+    df_model['month'] = df_model['date'].dt.month
+    df_model['dow'] = df_model['date'].dt.dayofweek
+    df_model['is_start'] = (df_model['day'] == 1).astype(int)
+    
+    X = df_model[['day', 'month', 'dow', 'is_start']]
+    y = df_model['total_bio']
+    
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(X, y)
+    
+    col_input, col_result = st.columns(2)
+    
+    with col_input:
+        pred_date = st.date_input("Forecast Date", value=pd.to_datetime("2026-01-01"))
+        run_pred = st.button("Generate Forecast", type="primary")
+        
+    with col_result:
+        if run_pred:
+            # Predict
+            feats = [[pred_date.day, pred_date.month, pred_date.weekday(), 1 if pred_date.day == 1 else 0]]
+            prediction = model.predict(feats)[0]
+            
+            st.metric("Expected Load", f"{int(prediction):,}")
+            
+            if prediction > capacity:
+                st.error("⚠️ Overload Predicted. Activate Load Balancer.")
+                st.progress(100)
+            else:
+                st.success("✅ Within Operational Limits.")
+                st.progress(int((prediction/capacity)*100))
+
+# --- FOOTER ---
+st.markdown("---")
+st.markdown("<div style='text-align: center; color: grey;'>Developed for Next-Gen Governance | Powered by Python & AI</div>", unsafe_allow_html=True)
