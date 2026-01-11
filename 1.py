@@ -5,7 +5,6 @@ import plotly.graph_objects as go
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
-import glob
 import warnings
 
 # Suppress warnings for a clean UI
@@ -20,7 +19,6 @@ st.set_page_config(
 )
 
 # --- 2. ETHEREAL STYLING (Custom CSS) ---
-# This injects a "Dark Glassmorphism" theme
 st.markdown("""
 <style>
     /* Main Background - Deep Futuristic Blue/Black Gradient */
@@ -66,11 +64,16 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. INTELLIGENT DATA LOADER ---
+# --- 3. SIDEBAR & FILE UPLOADER ---
+st.sidebar.markdown("## 🧬 Aadhar Nexus")
+st.sidebar.markdown("---")
+
+st.sidebar.info("Upload your Biometric Data CSVs below to initialize the Command Center.")
+uploaded_files = st.sidebar.file_uploader("📂 Upload Biometric CSVs", accept_multiple_files=True, type="csv")
+
+# --- 4. INTELLIGENT DATA LOADER ---
 @st.cache_data
-def load_data():
-    # Auto-detect biometric files
-    files = glob.glob("api_data_aadhar_biometric_*.csv")
+def load_data(files):
     if not files:
         return None, "missing"
     
@@ -84,22 +87,37 @@ def load_data():
             
     if df_list:
         df = pd.concat(df_list, ignore_index=True)
-        df['date'] = pd.to_datetime(df['date'], dayfirst=True)
-        df['total_bio'] = df['bio_age_5_17'] + df['bio_age_17_']
-        return df, "success"
+        # Ensure column names are lowercase
+        df.columns = [c.lower() for c in df.columns]
+        
+        # Date Parsing
+        if 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'], dayfirst=True)
+            
+            # Create Total Bio column if it doesn't exist
+            if 'total_bio' not in df.columns:
+                if 'bio_age_5_17' in df.columns and 'bio_age_17_' in df.columns:
+                    df['total_bio'] = df['bio_age_5_17'] + df['bio_age_17_']
+                else:
+                    return None, "invalid_columns"
+                    
+            return df, "success"
     return None, "empty"
 
-# Load Data
-df, status = load_data()
+# Load Data based on User Uploads
+df, status = load_data(uploaded_files)
 
-# --- 4. SIDEBAR NAVIGATION ---
-st.sidebar.markdown("## 🧬 Aadhar Nexus")
-st.sidebar.markdown("---")
+# --- 5. DATA VALIDATION ---
 if status == "missing":
-    st.error("No Data Found")
-    st.sidebar.warning("Please place CSV files in the folder.")
+    st.markdown("# 🧬 Aadhar Operations Command")
+    st.warning("⚠️ Waiting for Data Uplink...")
+    st.info("Please drag and drop the `api_data_aadhar_biometric_....csv` files in the sidebar.")
+    st.stop()
+elif status == "invalid_columns":
+    st.error("Error: The uploaded files do not have the required Biometric columns (`bio_age_5_17`, `bio_age_17_`).")
     st.stop()
 
+# --- 6. DATE FILTERS ---
 # Date Filter in Sidebar
 min_date = df['date'].min()
 max_date = df['date'].max()
@@ -115,7 +133,7 @@ date_range = st.sidebar.date_input(
 mask = (df['date'].dt.date >= date_range[0]) & (df['date'].dt.date <= date_range[1])
 filtered_df = df.loc[mask]
 
-# --- 5. HEADS UP DISPLAY (KPIs) ---
+# --- 7. HEADS UP DISPLAY (KPIs) ---
 st.markdown("# 🧬 Aadhar Operations Command")
 st.markdown(f"### *System Status: Active | Monitoring {filtered_df['state'].nunique()} States*")
 st.write("")
@@ -134,7 +152,7 @@ col4.metric("Highest Activity Zone", top_state, "Hotspot")
 
 st.markdown("---")
 
-# --- 6. MAIN INTERFACE TABS ---
+# --- 8. MAIN INTERFACE TABS ---
 tab_eda, tab_ai, tab_sim, tab_pred = st.tabs([
     "📊 Deep Dive Analytics", 
     "🧠 AI Cluster Intelligence", 
@@ -318,4 +336,4 @@ with tab_pred:
 
 # --- FOOTER ---
 st.markdown("---")
-st.markdown("<div style='text-align: center; color: grey;'>Developed for Next-Gen Governance | Powered by Python & AI</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align: center; color: grey;'>Developed for Next-Gen Governance | Powered by Python </div>", unsafe_allow_html=True)
